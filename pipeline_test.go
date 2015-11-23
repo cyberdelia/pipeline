@@ -18,18 +18,20 @@ func decodePipeline(r io.ReadCloser) (io.ReadCloser, error) {
 	return ioutil.NopCloser(base64.NewDecoder(base64.StdEncoding, r)), nil
 }
 
-type buffer struct {
-	bytes.Buffer
+type nopCloser struct {
+	io.Writer
 }
 
-func (b *buffer) Close() error {
-	return nil
+func (nc nopCloser) Close() error { return nil }
+
+func NopCloser(w io.Writer) io.WriteCloser {
+	return nopCloser{w}
 }
 
 func TestPipeWriter(t *testing.T) {
+	var output bytes.Buffer
 	input := bytes.NewBufferString("aloha")
-	output := new(buffer)
-	w, err := PipeWrite(output, encodePipeline)
+	w, err := PipeWrite(NopCloser(&output), encodePipeline)
 	if err != nil {
 		t.Error(err)
 	}
@@ -41,14 +43,14 @@ func TestPipeWriter(t *testing.T) {
 }
 
 func TestPipeRead(t *testing.T) {
-	input := new(buffer)
+	var output bytes.Buffer
+	var input bytes.Buffer
 	input.WriteString("YWxvaGE=")
-	output := new(bytes.Buffer)
-	r, err := PipeRead(input, decodePipeline)
+	r, err := PipeRead(ioutil.NopCloser(&input), decodePipeline)
 	if err != nil {
 		t.Error(err)
 	}
-	io.Copy(output, r)
+	io.Copy(&output, r)
 	r.Close()
 	if output.String() != "aloha" {
 		t.Errorf("unexpected output, wants %s, got %s", "aloha", output.String())
