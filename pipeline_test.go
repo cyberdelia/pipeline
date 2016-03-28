@@ -4,18 +4,25 @@ package pipeline
 
 import (
 	"bytes"
-	"encoding/base64"
+	"crypto/rand"
 	"io"
 	"io/ioutil"
+	"sync/atomic"
 	"testing"
 )
 
-func encodePipeline(w io.WriteCloser) (io.WriteCloser, error) {
-	return base64.NewEncoder(base64.StdEncoding, w), nil
+func writePipeline(count *int64) WritePipeline {
+	return func(w io.WriteCloser) (io.WriteCloser, error) {
+		atomic.AddInt64(count, 1)
+		return w, nil
+	}
 }
 
-func decodePipeline(r io.ReadCloser) (io.ReadCloser, error) {
-	return ioutil.NopCloser(base64.NewDecoder(base64.StdEncoding, r)), nil
+func readPipeline(count *int64) ReadPipeline {
+	return func(r io.ReadCloser) (io.ReadCloser, error) {
+		atomic.AddInt64(count, 1)
+		return r, nil
+	}
 }
 
 type nopCloser struct {
@@ -30,29 +37,29 @@ func NopCloser(w io.Writer) io.WriteCloser {
 
 func TestPipeWriter(t *testing.T) {
 	var output bytes.Buffer
-	input := bytes.NewBufferString("aloha")
-	w, err := PipeWrite(NopCloser(&output), encodePipeline)
+	var count int64
+	w, err := PipeWrite(NopCloser(&output), writePipeline(&count), writePipeline(&count))
 	if err != nil {
 		t.Error(err)
 	}
-	io.Copy(w, input)
-	w.Close()
-	if output.String() != "YWxvaGE=" {
-		t.Errorf("unexpected output, wants %s, got %s", "YWxvaGE=", output.String())
+	defer w.Close()
+	if _, err := io.CopyN(w, rand.Reader, 64); err != nil {
+		t.Error(err)
+	}
+	if count != 2 {
+		t.Errorf("unexpected count, got %d, wants %d", count, 2)
 	}
 }
 
 func TestPipeRead(t *testing.T) {
 	var output bytes.Buffer
-	var input bytes.Buffer
-	input.WriteString("YWxvaGE=")
-	r, err := PipeRead(ioutil.NopCloser(&input), decodePipeline)
+	var count int64
+	r, err := PipeRead(ioutil.NopCloser(rand.Reader), readPipeline(&count), readPipeline(&count))
 	if err != nil {
 		t.Error(err)
 	}
-	io.Copy(&output, r)
-	r.Close()
-	if output.String() != "aloha" {
-		t.Errorf("unexpected output, wants %s, got %s", "aloha", output.String())
+	defer r.Close()
+	if _, err := io.CopyN(&output, r, 64); err != nil {
+		t.Error(err)
 	}
 }
